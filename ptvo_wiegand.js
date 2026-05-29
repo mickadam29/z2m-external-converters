@@ -80,6 +80,29 @@ tz.ptvo_unlock_code = {
 };
 
 /* =========================================================
+   UART TX — LOCK_STATUS
+   lock       → LOCK       (timer via blockDelayMs)
+   lock_until → LOCK_UNTIL (indéfini jusqu'à UNLOCK)
+   unlock     → UNLOCK
+========================================================= */
+tz.ptvo_lock_status = {
+    key: ['lock_status'],
+    cluster: 'genMultistateValue',
+    type: 'write',
+    convertSet: async (entity, key, value, meta) => {
+        if (value === 'lock') {
+            await uartWrite(entity, 'LOCK', meta);
+        } else if (value === 'lock_until') {
+            await uartWrite(entity, 'LOCK_UNTIL', meta);
+        } else if (value === 'unlock') {
+            await uartWrite(entity, 'UNLOCK', meta);
+        } else {
+            throw new Error(`ptvo_lock_status: valeur non supportée: ${value}`);
+        }
+    },
+};
+
+/* =========================================================
    UART RX — BADGE / PIN / ABANDON / TAMPER
    Le CC2530 (PTVO) envoie du texte ASCII brut, terminé par \n.
    Format : "BADGE:<number>\n", "PIN:<number>\n", "ABANDON\n", "TAMPER\n"
@@ -133,8 +156,13 @@ fz.ptvo_uart_badge = {
         if (str.startsWith('BADGE:')) {
             const badge = str.slice(6);
             if (/^\d+$/.test(badge) && badge.length >= 4) {
+                const raw = parseInt(badge, 10);
+                // Inversion des octets pour aligner avec l'ordre ISO 14443A (ACR122U)
+                const n = raw <= 0xFFFFFFFF
+                    ? (((raw & 0xFF) << 24) | (((raw >> 8) & 0xFF) << 16) | (((raw >> 16) & 0xFF) << 8) | ((raw >>> 24) & 0xFF)) >>> 0
+                    : raw;
                 clearAfter(clear);
-                return { action: `BADGE:${badge}`, badge_number: parseInt(badge, 10), event: 'badge' };
+                return { action: `BADGE:${n}`, badge_number: n, event: 'badge' };
             }
         }
 
@@ -169,7 +197,7 @@ const device = {
 
     fromZigbee: [fz.ptvo_uart_badge],
 
-    toZigbee: [tz.ptvo_uart_action, tz.ptvo_delay_lockout, tz.ptvo_unlock_code],
+    toZigbee: [tz.ptvo_uart_action, tz.ptvo_delay_lockout, tz.ptvo_unlock_code, tz.ptvo_lock_status],
 
     exposes: [
         exposes.enum('action', ea.SET, ['CODE_OK', 'CODE_KO']),
@@ -180,6 +208,8 @@ const device = {
         exposes.numeric('unlock_code', ea.SET)
             .withValueMin(0).withValueMax(9999999999)
             .withDescription('Code de déblocage (10 chiffres, zéros de tête supportés)'),
+        exposes.enum('lock_status', ea.SET, ['lock', 'lock_until', 'unlock'])
+            .withDescription('Verrouillage du clavier (lock=LOCK timer, lock_until=LOCK_UNTIL indéfini, unlock=UNLOCK)'),
 
         exposes.numeric('pin_number', ea.STATE),
         exposes.numeric('badge_number', ea.STATE),
