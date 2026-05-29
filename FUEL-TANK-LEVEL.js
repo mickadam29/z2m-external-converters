@@ -10,7 +10,7 @@ fz.ptvo_on_off = {
     convert: (model, msg, publish, options, meta) => {
         if (msg.data.hasOwnProperty('onOff')) {
             const channel = msg.endpoint.ID;
-            return {[`state_input_${channel - 1}`]: msg.data['onOff'] === 1 ? 'ON' : 'OFF'};
+            return {[`state_input_${channel - 1}`]: msg.data['onOff'] === 0 ? 'ON' : 'OFF'};
         }
     },
 };
